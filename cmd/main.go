@@ -30,13 +30,29 @@ func main() {
 
 	slog.With("result", hash).Info("created sha1 of script")
 
-	asBool, err := client.Do(context.TODO(), client.B().ScriptExists().Sha1(hash).Build()).AsIntSlice()
-	if err != nil {
-		return
-	}
-
-	slog.With("exists", asBool).Info("executed SCRIPT EXISTS")
+	ReportScriptExists(context.TODO(), client, hash)
 
 	l := rueidis.NewLuaScript(script)
 	l.Exec(context.TODO(), client, []string{"test"}, []string{"1"})
+
+	ReportScriptExists(context.TODO(), client, hash)
+}
+
+func ReportScriptExists(ctx context.Context, client rueidis.Client, hash string) {
+	if ok, err := scriptExists(ctx, client, hash); err != nil {
+		slog.With("error", err.Error()).Error("SCRIPT EXISTS failed")
+	} else if ok {
+		slog.Info("script exists in Redis")
+	} else {
+		slog.Info("script does not exist in Redis")
+	}
+}
+
+func scriptExists(ctx context.Context, client rueidis.Client, hash string) (bool, error) {
+	res, err := client.Do(ctx, client.B().ScriptExists().Sha1(hash).Build()).AsIntSlice()
+	if err != nil {
+		return false, err
+	}
+
+	return res[0] == 1, nil
 }
