@@ -4,8 +4,9 @@ import (
 	"context"
 	"crypto/sha1"
 	"fmt"
-	"github.com/redis/rueidis"
 	"log/slog"
+
+	"github.com/redis/rueidis"
 )
 
 func main() {
@@ -22,20 +23,45 @@ func main() {
 		client = c
 	}
 
+	// basic script
 	script := "local key = KEYS[1]\nlocal increment_value = ARGV[1]\n\nreturn redis.call('INCRBY', key, increment_value)"
+
+	// create sha1 hash to check if the script exists
 	h := sha1.New()
 	h.Write([]byte(script))
 	sha1Res := h.Sum(nil)
 	hash := fmt.Sprintf("%x", sha1Res)
 
-	slog.With("result", hash).Info("created sha1 of script")
+	ReportScriptExists(context.TODO(), client, hash)
+
+	redisScript := rueidis.NewLuaScript(script)
+	if err := redisScript.Exec(context.TODO(), client, []string{"test"}, []string{"1"}).Error(); err != nil {
+		slog.With("error", err.Error()).Error("failed to execute basic script")
+		return
+	}
 
 	ReportScriptExists(context.TODO(), client, hash)
 
-	l := rueidis.NewLuaScript(script)
-	l.Exec(context.TODO(), client, []string{"test"}, []string{"1"})
+	// sending whole JSON (string-ified) over the network...
+	script = "local key = KEYS[1]\nlocal json_value = ARGV[1]\n\nreturn redis.call('JSON.SET', key, '$', json_value)"
 
-	ReportScriptExists(context.TODO(), client, hash)
+	type Thing struct {
+		Name  string `json:"name,omitempty"`
+		Value string `json:"value,omitempty"`
+	}
+
+	thing := Thing{
+		Name:  "name of thing",
+		Value: "value of thing",
+	}
+
+	thingJson := rueidis.JSON(thing)
+
+	redisScript = rueidis.NewLuaScript(script)
+
+	if err := redisScript.Exec(context.TODO(), client, []string{"jsontest"}, []string{thingJson}).Error(); err != nil {
+		slog.With("error", err.Error()).Error("failed to execute json script")
+	}
 }
 
 func ReportScriptExists(ctx context.Context, client rueidis.Client, hash string) {
